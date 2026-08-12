@@ -911,6 +911,11 @@ td:nth-child(3) {
   text-align: left;
 }
 
+th:nth-child(7),
+td:nth-child(7) {
+  text-align: center;
+}
+
 th:first-child { width: 108px; }
 th:nth-child(2) { width: 112px; }
 th:nth-child(3) { width: 172px; }
@@ -940,6 +945,7 @@ tbody tr:hover td {
 
 .table-share {
   width: max-content;
+  margin-inline: auto;
   cursor: help;
   outline: none;
 }
