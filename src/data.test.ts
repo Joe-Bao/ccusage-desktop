@@ -7,6 +7,7 @@ import {
   rangeDates,
   rangeLabel,
   sessionLabel,
+  sessionTitle,
   sessionsWithShare,
   type UsageDocument,
   type UsageRow,
@@ -61,6 +62,10 @@ test("session shares retain UTF-8 labels and sum to one", () => {
   assert.equal(sessions[0].share, 0.25);
   assert.equal(sessions[1].share, 0.75);
   assert.equal(sessionLabel("项目/中文会话 🚀"), "中文会话 🚀");
+  assert.equal(
+    sessionTitle(row({ metadata: { title: "可读标题", project: "api" } })),
+    "可读标题",
+  );
 });
 
 test("model and agent aggregation uses token totals", () => {

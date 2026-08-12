@@ -7,7 +7,7 @@ import {
   parseUsageResponse,
   rangeDates,
   rangeLabel,
-  sessionLabel,
+  sessionTitle,
   sessionsWithShare,
   topFiveConcentration,
   type DateRange,
@@ -411,7 +411,14 @@ function sessionPool(): SessionUsage[] {
   const query = state.sessionQuery.trim().toLocaleLowerCase();
   const filtered = query
     ? sessions.filter((session) =>
-        [session.period, session.agent, ...session.modelsUsed]
+        [
+          session.period,
+          session.agent,
+          session.metadata?.title,
+          session.metadata?.project,
+          session.metadata?.cwd,
+          ...session.modelsUsed,
+        ]
           .join(" ")
           .toLocaleLowerCase()
           .includes(query),
@@ -433,7 +440,7 @@ function renderSessionStats(sessions: SessionUsage[]): void {
   const sorted = [...sessions].sort((left, right) => right.totalTokens - left.totalTokens);
   const cards = [
     ["会话数量", formatExact(sessions.length), `${activeRangeLabel()}内有活动`],
-    ["最大单会话占用", sorted[0] ? formatPercent(sorted[0].share) : "—", sorted[0] ? sessionLabel(sorted[0].period) : "暂无会话"],
+    ["最大单会话占用", sorted[0] ? formatPercent(sorted[0].share) : "—", sorted[0] ? sessionTitle(sorted[0]) : "暂无会话"],
     ["Top 5 集中度", formatPercent(topFiveConcentration(sessions)), "前五个会话占全部 Tokens"],
   ];
   for (const [label, value, meta] of cards) {
@@ -445,7 +452,9 @@ function renderSessionStats(sessions: SessionUsage[]): void {
 
 function detailCell(label: string, value: string): HTMLElement {
   const cell = node("div", "detail-cell");
-  cell.append(node("small", undefined, label), node("strong", undefined, value));
+  const detail = node("strong", undefined, value);
+  detail.title = value;
+  cell.append(node("small", undefined, label), detail);
   return cell;
 }
 
@@ -467,12 +476,18 @@ function renderSessions(): void {
     summary.append(node("span", "session-rank", String(index + 1).padStart(2, "0")));
 
     const main = node("div", "session-main");
-    const title = node("strong", "session-title", sessionLabel(session.period));
-    title.title = session.period;
+    const title = node("strong", "session-title", sessionTitle(session));
+    title.title = [session.metadata?.cwd, session.period].filter(Boolean).join("\n");
     const subtitle = node("div", "session-subtitle");
     const badge = node("span", "agent-badge", session.agent);
     badge.dataset.agent = session.agent;
-    subtitle.append(badge, node("span", undefined, session.modelsUsed.join(", ") || "未知模型"));
+    subtitle.append(badge);
+    if (session.metadata?.project) {
+      const project = node("span", "project-badge", session.metadata.project);
+      project.title = session.metadata.cwd ?? session.metadata.project;
+      subtitle.append(project);
+    }
+    subtitle.append(node("span", undefined, session.modelsUsed.join(", ") || "未知模型"));
     main.append(title, subtitle);
 
     const share = node("div", "share-column");
@@ -492,6 +507,8 @@ function renderSessions(): void {
 
     const detail = node("div", "session-details");
     detail.append(
+      detailCell("项目", session.metadata?.project ?? "—"),
+      detailCell("工作目录", session.metadata?.cwd ?? "—"),
       detailCell("输入 Tokens", formatExact(session.inputTokens)),
       detailCell("输出 Tokens", formatExact(session.outputTokens)),
       detailCell("缓存读取", formatExact(session.cacheReadTokens)),
@@ -608,9 +625,10 @@ async function loadUsage(refresh: boolean): Promise<void> {
   showBanner();
   try {
     const dates = activeDates();
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const raw = IS_TAURI
       ? await invoke<UsageResponse>("load_usage", {
-          request: { ...dates, refresh },
+          request: { ...dates, timezone, refresh },
         })
       : demoResponse(dates);
     state.response = parseUsageResponse(raw);

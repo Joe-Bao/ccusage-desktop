@@ -39,8 +39,11 @@ export interface UsageRow extends TokenNumbers {
   agents?: AgentBreakdown[];
   metadata?: {
     agents?: string[];
+    cwd?: string;
     lastActivity?: string;
+    project?: string;
     reasoningOutputTokens?: number;
+    title?: string;
   };
 }
 
@@ -231,6 +234,10 @@ export function sessionLabel(period: string): string {
   const name = normalized.split("/").at(-1) || period;
   if (name.length <= 56) return name;
   return `${name.slice(0, 24)}…${name.slice(-27)}`;
+}
+
+export function sessionTitle(session: UsageRow): string {
+  return session.metadata?.title?.trim() || sessionLabel(session.period);
 }
 
 export function topFiveConcentration(sessions: SessionUsage[]): number {

@@ -8,6 +8,18 @@ import type {
 
 const AGENTS = ["codex", "claude", "opencode"];
 const MODELS = ["gpt-5.6-sol", "gpt-5.5", "claude-opus-4-7"];
+const PROJECTS = [
+  { name: "api", cwd: "D:\\api" },
+  { name: "research", cwd: "D:\\research" },
+  { name: "ccusage-desktop", cwd: "D:\\api\\ccusage-desktop" },
+];
+const SESSION_TITLES = [
+  "创建 ccusage Windows WebView 项目",
+  "优化 API 请求性能",
+  "修复单日趋势图显示",
+  "增加会话标题与项目",
+  "验证本地缓存行为",
+];
 
 function dayString(date: Date): string {
   return [date.getFullYear(), date.getMonth() + 1, date.getDate()]
@@ -89,22 +101,23 @@ function makeDaily(days: number, now: Date): UsageRow[] {
 
 function makeSessions(days: number, now: Date): UsageRow[] {
   const count = Math.min(Math.max(days * 2, 18), 96);
-  const names = [
-    "rollout-产品发布-UTF8-验证",
-    "API 性能优化 🚀",
-    "desktop-cache-layer",
-    "修复 WebView 遮挡问题",
-    "usage-dashboard-polish",
-  ];
   return Array.from({ length: count }, (_, index) => {
     const data = breakdown(AGENTS[index % AGENTS.length], index + 3, 0.08 + (index % 11) * 0.035);
     const activity = new Date(now.getTime() - (index * 7.5 * 60 * 60 * 1000));
+    const project = PROJECTS[Math.floor(index / AGENTS.length) % PROJECTS.length];
     return {
       ...data,
-      period: `${dayString(activity).replaceAll("-", "/")}/${names[index % names.length]}-${String(index + 1).padStart(3, "0")}`,
+      period: `${dayString(activity).replaceAll("-", "/")}/rollout-demo-${String(index + 1).padStart(3, "0")}`,
       metadata: {
         lastActivity: activity.toISOString(),
         reasoningOutputTokens: Math.round(data.outputTokens * (0.08 + (index % 4) * 0.04)),
+        ...(data.agent === "codex"
+          ? {
+              cwd: project.cwd,
+              project: project.name,
+              title: SESSION_TITLES[index % SESSION_TITLES.length],
+            }
+          : {}),
       },
     };
   });

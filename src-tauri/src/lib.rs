@@ -3,7 +3,7 @@ use serde_json::Value;
 use std::{
     collections::HashMap,
     fs::{self, File},
-    io::{self, Write},
+    io::{self, BufRead, BufReader, Write},
     path::{Path, PathBuf},
     sync::Mutex,
     time::{Instant, SystemTime, UNIX_EPOCH},
@@ -11,7 +11,7 @@ use std::{
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_shell::ShellExt;
 
-const CACHE_VERSION: u8 = 1;
+const CACHE_VERSION: u8 = 2;
 const CACHE_TTL_SECONDS: u64 = 300;
 const MAX_CACHE_ENTRIES: usize = 6;
 const CCUSAGE_VERSION: &str = "20.0.19";
@@ -21,8 +21,48 @@ const CCUSAGE_VERSION: &str = "20.0.19";
 struct UsageRequest {
     since: Option<String>,
     until: Option<String>,
+    timezone: Option<String>,
     #[serde(default)]
     refresh: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionIndexEntry {
+    id: String,
+    thread_name: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct CodexState {
+    #[serde(rename = "local-projects", default)]
+    local_projects: HashMap<String, LocalProject>,
+    #[serde(rename = "thread-project-assignments", default)]
+    thread_project_assignments: HashMap<String, ThreadProjectAssignment>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalProject {
+    name: String,
+    #[serde(default)]
+    root_paths: Vec<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ThreadProjectAssignment {
+    project_id: String,
+    cwd: Option<PathBuf>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionMetaLine {
+    payload: SessionMetaPayload,
+}
+
+#[derive(Debug, Deserialize)]
+struct SessionMetaPayload {
+    cwd: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -107,15 +147,207 @@ fn validate_request(request: &UsageRequest) -> Result<(), String> {
         return Err("since must not be later than until".into());
     }
 
+    if request.timezone.as_deref().is_some_and(|timezone| {
+        timezone.is_empty()
+            || timezone.len() > 64
+            || !timezone.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'_' | b'-' | b'+')
+            })
+    }) {
+        return Err("timezone must be a valid IANA name".into());
+    }
+
     Ok(())
 }
 
 fn cache_key(request: &UsageRequest) -> String {
     format!(
-        "{}-{}",
+        "{}-{}-{}",
         request.since.as_deref().unwrap_or("start"),
-        request.until.as_deref().unwrap_or("end")
+        request.until.as_deref().unwrap_or("end"),
+        request.timezone.as_deref().unwrap_or("local")
     )
+}
+
+fn codex_dir(app: &AppHandle) -> Option<PathBuf> {
+    std::env::var_os("CODEX_HOME")
+        .map(PathBuf::from)
+        .or_else(|| app.path().home_dir().ok().map(|home| home.join(".codex")))
+}
+
+fn session_id(period: &str) -> Option<String> {
+    let raw_filename = period
+        .rsplit(|character| character == '/' || character == char::from(92))
+        .next()?;
+    let filename = raw_filename.strip_suffix(".jsonl").unwrap_or(raw_filename);
+    let id = filename.get(filename.len().checked_sub(36)?..)?;
+    let bytes = id.as_bytes();
+    if bytes.len() != 36
+        || bytes.iter().enumerate().any(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                *byte != b'-'
+            } else {
+                !byte.is_ascii_hexdigit()
+            }
+        })
+    {
+        return None;
+    }
+    Some(id.to_string())
+}
+
+fn load_session_titles(codex_dir: &Path) -> HashMap<String, String> {
+    let Ok(contents) = fs::read_to_string(codex_dir.join("session_index.jsonl")) else {
+        return HashMap::new();
+    };
+    contents
+        .lines()
+        .filter_map(|line| serde_json::from_str::<SessionIndexEntry>(line).ok())
+        .map(|entry| (entry.id, entry.thread_name))
+        .collect()
+}
+
+fn load_codex_state(codex_dir: &Path) -> CodexState {
+    [".codex-global-state.json", ".codex-global-state.json.bak"]
+        .into_iter()
+        .find_map(|filename| {
+            fs::read(codex_dir.join(filename))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+        })
+        .unwrap_or_default()
+}
+
+fn safe_rollout_filename(period: &str) -> Option<String> {
+    let raw_filename = period
+        .rsplit(|character| character == '/' || character == char::from(92))
+        .next()?;
+    let filename = raw_filename.strip_suffix(".jsonl").unwrap_or(raw_filename);
+    if !filename.starts_with("rollout-") {
+        return None;
+    }
+    Some(format!("{filename}.jsonl"))
+}
+
+fn rollout_cwd(codex_dir: &Path, period: &str) -> Option<PathBuf> {
+    let normalized = period.replace(char::from(92), "/");
+    let parts = normalized.split('/').collect::<Vec<_>>();
+    let filename = safe_rollout_filename(period)?;
+    let mut candidates = Vec::with_capacity(2);
+    if parts.len() == 4
+        && parts[..3]
+            .iter()
+            .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+    {
+        candidates.push(
+            codex_dir
+                .join("sessions")
+                .join(parts[0])
+                .join(parts[1])
+                .join(parts[2])
+                .join(&filename),
+        );
+    }
+    candidates.push(codex_dir.join("archived_sessions").join(filename));
+
+    candidates.into_iter().find_map(|path| {
+        let line = BufReader::new(File::open(path).ok()?)
+            .lines()
+            .next()?
+            .ok()?;
+        serde_json::from_str::<SessionMetaLine>(&line)
+            .ok()?
+            .payload
+            .cwd
+    })
+}
+
+fn normalize_path(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('/', std::path::MAIN_SEPARATOR_STR)
+        .trim_end_matches(std::path::MAIN_SEPARATOR)
+        .to_lowercase()
+}
+
+fn project_name(state: &CodexState, session_id: &str, cwd: Option<&Path>) -> Option<String> {
+    if let Some(project) = state
+        .thread_project_assignments
+        .get(session_id)
+        .and_then(|assignment| state.local_projects.get(&assignment.project_id))
+    {
+        return Some(project.name.clone());
+    }
+
+    let cwd = cwd?;
+    let normalized_cwd = normalize_path(cwd);
+    state
+        .local_projects
+        .values()
+        .flat_map(|project| {
+            project.root_paths.iter().filter_map(|root| {
+                let normalized_root = normalize_path(root);
+                (!normalized_root.is_empty()
+                    && (normalized_cwd == normalized_root
+                        || normalized_cwd.starts_with(
+                            &(normalized_root.clone() + std::path::MAIN_SEPARATOR_STR),
+                        )))
+                .then_some((normalized_root.len(), project.name.clone()))
+            })
+        })
+        .max_by_key(|(length, _)| *length)
+        .map(|(_, name)| name)
+        .or_else(|| {
+            cwd.file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+        })
+}
+
+fn enrich_codex_sessions(codex_dir: &Path, data: &mut Value) {
+    let titles = load_session_titles(codex_dir);
+    let state = load_codex_state(codex_dir);
+    let Some(sessions) = data.get_mut("session").and_then(Value::as_array_mut) else {
+        return;
+    };
+
+    for session in sessions {
+        if session.get("agent").and_then(Value::as_str) != Some("codex") {
+            continue;
+        }
+        let Some(period) = session
+            .get("period")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+        else {
+            continue;
+        };
+        let Some(id) = session_id(&period) else {
+            continue;
+        };
+        let cwd = state
+            .thread_project_assignments
+            .get(&id)
+            .and_then(|assignment| assignment.cwd.clone())
+            .or_else(|| rollout_cwd(codex_dir, &period));
+        let project = project_name(&state, &id, cwd.as_deref());
+        let metadata = session
+            .as_object_mut()
+            .expect("session rows are objects")
+            .entry("metadata")
+            .or_insert_with(|| Value::Object(Default::default()));
+        if !metadata.is_object() {
+            *metadata = Value::Object(Default::default());
+        }
+        let metadata = metadata.as_object_mut().expect("metadata initialized");
+        if let Some(title) = titles.get(&id) {
+            metadata.insert("title".into(), title.clone().into());
+        }
+        if let Some(project) = project {
+            metadata.insert("project".into(), project.into());
+        }
+        if let Some(cwd) = cwd {
+            metadata.insert("cwd".into(), cwd.to_string_lossy().into_owned().into());
+        }
+    }
 }
 
 fn cache_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -236,6 +468,9 @@ async fn run_ccusage(app: &AppHandle, request: &UsageRequest) -> Result<Value, S
     if let Some(until) = &request.until {
         arguments.extend(["--until".into(), until.clone()]);
     }
+    if let Some(timezone) = &request.timezone {
+        arguments.extend(["--timezone".into(), timezone.clone()]);
+    }
 
     let output = app
         .shell()
@@ -255,8 +490,12 @@ async fn run_ccusage(app: &AppHandle, request: &UsageRequest) -> Result<Value, S
         });
     }
 
-    serde_json::from_slice(&output.stdout)
-        .map_err(|error| format!("ccusage returned invalid JSON or UTF-8: {error}"))
+    let mut data = serde_json::from_slice(&output.stdout)
+        .map_err(|error| format!("ccusage returned invalid JSON or UTF-8: {error}"))?;
+    if let Some(codex_dir) = codex_dir(app) {
+        enrich_codex_sessions(&codex_dir, &mut data);
+    }
+    Ok(data)
 }
 
 #[tauri::command]
@@ -344,9 +583,52 @@ mod tests {
         let reversed = UsageRequest {
             since: Some("20260813".into()),
             until: Some("20260812".into()),
+            timezone: Some("Australia/Sydney".into()),
             refresh: false,
         };
         assert!(validate_request(&reversed).is_err());
+    }
+
+    #[test]
+    fn enriches_codex_sessions_with_title_project_and_cwd() {
+        let directory = std::env::temp_dir().join(format!(
+            "ccusage-desktop-metadata-{}-{}",
+            std::process::id(),
+            now_seconds()
+        ));
+        let rollout_directory = directory.join("sessions/2026/08/13");
+        fs::create_dir_all(&rollout_directory).expect("create rollout directory");
+        fs::write(
+            directory.join("session_index.jsonl"),
+            r#"{"id":"019ff6bc-94df-7340-9327-7f6c26345d85","thread_name":"创建桌面看板","updated_at":"2026-08-13T00:00:00Z"}"#,
+        )
+        .expect("write title index");
+        fs::write(
+            directory.join(".codex-global-state.json"),
+            r#"{"local-projects":{"project-1":{"name":"api","rootPaths":["D:/api"]}},"thread-project-assignments":{}}"#,
+        )
+        .expect("write project state");
+        fs::write(
+            rollout_directory
+                .join("rollout-2026-08-13T00-00-00-019ff6bc-94df-7340-9327-7f6c26345d85.jsonl"),
+            r#"{"type":"session_meta","payload":{"cwd":"D:/api"}}"#,
+        )
+        .expect("write rollout metadata");
+
+        let mut data = json!({
+            "session": [{
+                "agent": "codex",
+                "period": "2026/08/13/rollout-2026-08-13T00-00-00-019ff6bc-94df-7340-9327-7f6c26345d85",
+                "metadata": {"lastActivity": "2026-08-13T00:00:00Z"}
+            }]
+        });
+        enrich_codex_sessions(&directory, &mut data);
+        let metadata = &data["session"][0]["metadata"];
+        assert_eq!(metadata["title"], "创建桌面看板");
+        assert_eq!(metadata["project"], "api");
+        assert_eq!(metadata["cwd"], "D:/api");
+        assert_eq!(metadata["lastActivity"], "2026-08-13T00:00:00Z");
+        fs::remove_dir_all(directory).expect("remove metadata directory");
     }
 
     #[test]

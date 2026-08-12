@@ -1076,9 +1076,9 @@ tbody tr:hover td {
   display: block;
   overflow: hidden;
   color: var(--text);
-  font-family: "Cascadia Code", "Segoe UI", monospace;
+  font-family: inherit;
   font-size: var(--font-sm);
-  font-weight: 600;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1095,6 +1095,19 @@ tbody tr:hover td {
 
 .session-subtitle span:last-child {
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.project-badge {
+  max-width: 120px;
+  padding: 3px 6px;
+  overflow: hidden;
+  color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--blue) 22%, transparent);
+  border-radius: 6px;
+  font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1145,7 +1158,7 @@ tbody tr:hover td {
 
 .session-details {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
   padding: 2px 20px 18px 69px;
 }
