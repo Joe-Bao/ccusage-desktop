@@ -3,12 +3,14 @@ import {
   aggregateAgents,
   aggregateModels,
   cacheShare,
+  customRangeDates,
   parseUsageResponse,
   rangeDates,
   rangeLabel,
   sessionLabel,
   sessionsWithShare,
   topFiveConcentration,
+  type DateRange,
   type NamedTotal,
   type RangeKey,
   type SessionUsage,
@@ -37,6 +39,7 @@ const state: {
   range: RangeKey;
   view: ViewKey;
   metric: TrendMetric;
+  customRange: DateRange;
   response: UsageResponse | null;
   sessionQuery: string;
   sessionSort: "tokens" | "cost" | "latest";
@@ -45,6 +48,7 @@ const state: {
   range: "7d",
   view: "overview",
   metric: "tokens",
+  customRange: rangeDates("7d"),
   response: null,
   sessionQuery: "",
   sessionSort: "tokens",
@@ -110,6 +114,20 @@ function formatPercent(value: number): string {
   return percent.format(Number.isFinite(value) ? value : 0);
 }
 
+function activeDates(): DateRange {
+  return rangeDates(state.range, new Date(), state.customRange);
+}
+
+function activeRangeLabel(): string {
+  return rangeLabel(state.range, state.customRange);
+}
+
+function inputDate(value?: string): string {
+  return value?.length === 8
+    ? `${value.slice(0, 4)}-${value.slice(4, 6)}-${value.slice(6)}`
+    : "";
+}
+
 function formatDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
   return match ? `${match[2]} 月 ${match[3]} 日` : value;
@@ -139,7 +157,7 @@ function renderKpis(): void {
     {
       label: "预估费用",
       value: formatCost(totals.totalCost),
-      meta: `${rangeLabel(state.range)} · 离线价格`,
+      meta: `${activeRangeLabel()} · 离线价格`,
       icon: "$",
     },
     {
@@ -182,21 +200,27 @@ function renderDistribution(containerId: string, items: NamedTotal[]): void {
   for (const item of items.slice(0, 5)) {
     const row = node("div", "distribution-item");
     const name = node("span", "distribution-name", item.name);
-    name.title = item.name;
     const track = node("span", "distribution-track");
     const fill = node("i", "distribution-fill");
+    const detail = `${formatExact(item.tokens)} Tokens · ${formatPercent(item.share)} · ${formatCost(item.cost)}`;
     fill.style.width = `${Math.max(item.share * 100, 0.5)}%`;
     track.append(fill);
-    row.append(name, track, node("span", "distribution-value", formatPercent(item.share)));
+    row.tabIndex = 0;
+    row.setAttribute("aria-label", `${item.name}，${detail}`);
+    const tooltip = node("span", "distribution-tooltip", detail);
+    tooltip.setAttribute("aria-hidden", "true");
+    row.append(name, track, node("span", "distribution-value", formatPercent(item.share)), tooltip);
     container.append(row);
   }
 }
 
 function renderTrend(): void {
   const chart = byId<SVGSVGElement>("trend-chart");
+  const tooltip = byId<HTMLOutputElement>("chart-tooltip");
   const empty = byId("trend-empty");
   const rows = state.response?.data.daily ?? [];
   chart.replaceChildren();
+  tooltip.hidden = true;
   chart.toggleAttribute("hidden", rows.length === 0);
   empty.hidden = rows.length > 0;
   if (rows.length === 0) return;
@@ -207,7 +231,8 @@ function renderTrend(): void {
   const plotWidth = width - margin.left - margin.right;
   const plotHeight = height - margin.top - margin.bottom;
   const values = rows.map((row) => (state.metric === "tokens" ? row.totalTokens : row.totalCost));
-  const maximum = Math.max(...values, 1);
+  const singlePoint = rows.length === 1;
+  const maximum = Math.max(...values, 1) * (singlePoint ? 4 / 3 : 1);
   const x = (index: number) =>
     margin.left + (rows.length === 1 ? plotWidth / 2 : (index / (rows.length - 1)) * plotWidth);
   const y = (value: number) => margin.top + plotHeight - (value / maximum) * plotHeight;
@@ -242,15 +267,25 @@ function renderTrend(): void {
   }
 
   const points = values.map((value, index) => [x(index), y(value)] as const);
-  const path = points.map(([pointX, pointY], index) => `${index === 0 ? "M" : "L"}${pointX},${pointY}`).join(" ");
   const baseY = margin.top + plotHeight;
-  chart.append(
-    svgNode("path", {
-      class: "chart-area",
-      d: `${path} L${points.at(-1)?.[0]},${baseY} L${points[0][0]},${baseY} Z`,
-    }),
-    svgNode("path", { class: "chart-line", d: path }),
-  );
+  if (singlePoint) {
+    chart.append(svgNode("line", {
+      class: "chart-single-guide",
+      x1: String(points[0][0]),
+      x2: String(points[0][0]),
+      y1: String(points[0][1]),
+      y2: String(baseY),
+    }));
+  } else {
+    const path = points.map(([pointX, pointY], index) => `${index === 0 ? "M" : "L"}${pointX},${pointY}`).join(" ");
+    chart.append(
+      svgNode("path", {
+        class: "chart-area",
+        d: `${path} L${points.at(-1)?.[0]},${baseY} L${points[0][0]},${baseY} Z`,
+      }),
+      svgNode("path", { class: "chart-line", d: path }),
+    );
+  }
 
   const labelStep = Math.max(1, Math.ceil(rows.length / 6));
   rows.forEach((row, index) => {
@@ -264,16 +299,43 @@ function renderTrend(): void {
       label.textContent = row.period.slice(5).replace("-", "/");
       chart.append(label);
     }
+    const pointX = x(index);
+    const pointY = y(values[index]);
     const circle = svgNode("circle", {
       class: "chart-point",
-      cx: String(x(index)),
-      cy: String(y(values[index])),
-      r: rows.length > 45 ? "1.6" : "2.7",
+      cx: String(pointX),
+      cy: String(pointY),
+      r: singlePoint ? "5" : rows.length > 45 ? "1.6" : "2.7",
     });
-    const title = svgNode("title");
-    title.textContent = `${row.period}: ${state.metric === "tokens" ? formatExact(values[index]) + " Tokens" : formatCost(values[index])}`;
-    circle.append(title);
-    chart.append(circle);
+    const detail = `${formatDate(row.period)} · ${
+      state.metric === "tokens" ? formatExact(values[index]) + " Tokens" : formatCost(values[index])
+    }`;
+    const hit = svgNode("circle", {
+      class: "chart-hit",
+      cx: String(pointX),
+      cy: String(pointY),
+      r: "12",
+      tabindex: "0",
+      role: "img",
+      "aria-label": detail,
+    });
+    const showTooltip = () => {
+      tooltip.textContent = detail;
+      tooltip.style.left = `${Math.min(88, Math.max(12, (pointX / width) * 100))}%`;
+      tooltip.style.top = `${Math.max(8, (pointY / height) * 100)}%`;
+      tooltip.classList.toggle("is-below", pointY < 55);
+      tooltip.hidden = false;
+    };
+    const hideTooltip = () => {
+      tooltip.hidden = true;
+    };
+    hit.addEventListener("pointerenter", showTooltip);
+    hit.addEventListener("pointerleave", hideTooltip);
+    hit.addEventListener("focus", showTooltip);
+    hit.addEventListener("blur", hideTooltip);
+    const datum = svgNode("g", { class: "chart-datum" });
+    datum.append(circle, hit);
+    chart.append(datum);
   });
 
   const total = values.reduce((sum, value) => sum + value, 0);
@@ -370,7 +432,7 @@ function renderSessionStats(sessions: SessionUsage[]): void {
   container.replaceChildren();
   const sorted = [...sessions].sort((left, right) => right.totalTokens - left.totalTokens);
   const cards = [
-    ["会话数量", formatExact(sessions.length), `${rangeLabel(state.range)}内有活动`],
+    ["会话数量", formatExact(sessions.length), `${activeRangeLabel()}内有活动`],
     ["最大单会话占用", sorted[0] ? formatPercent(sorted[0].share) : "—", sorted[0] ? sessionLabel(sorted[0].period) : "暂无会话"],
     ["Top 5 集中度", formatPercent(topFiveConcentration(sessions)), "前五个会话占全部 Tokens"],
   ];
@@ -537,19 +599,20 @@ function updateStatus(): void {
   dot.className = `status-dot ${response.stale ? "is-error" : "is-ready"}`;
   byId("source-status").textContent = sources.length > 0 ? `${sources.length} 个数据源已就绪` : "数据源已就绪";
   byId("sync-status").textContent = response.cached
-    ? `缓存响应 ${response.durationMs} ms · ${rangeLabel(state.range)}`
-    : `扫描完成 ${response.durationMs} ms · ${rangeLabel(state.range)}`;
+    ? `缓存响应 ${response.durationMs} ms · ${activeRangeLabel()}`
+    : `扫描完成 ${response.durationMs} ms · ${activeRangeLabel()}`;
 }
 
 async function loadUsage(refresh: boolean): Promise<void> {
   setLoading(true);
   showBanner();
   try {
+    const dates = activeDates();
     const raw = IS_TAURI
       ? await invoke<UsageResponse>("load_usage", {
-          request: { ...rangeDates(state.range), refresh },
+          request: { ...dates, refresh },
         })
-      : demoResponse(state.range);
+      : demoResponse(dates);
     state.response = parseUsageResponse(raw);
     renderAll();
     updateStatus();
@@ -565,6 +628,28 @@ async function loadUsage(refresh: boolean): Promise<void> {
   }
 }
 
+function setRange(range: RangeKey): void {
+  state.range = range;
+  state.visibleSessions = 100;
+  document.querySelectorAll("[data-range]").forEach((item) =>
+    item.classList.toggle("is-active", (item as HTMLElement).dataset.range === range),
+  );
+}
+
+function openCustomRange(): void {
+  const dialog = byId<HTMLDialogElement>("custom-range-dialog");
+  const dates = state.range === "all" ? state.customRange : activeDates();
+  const since = byId<HTMLInputElement>("custom-since");
+  const until = byId<HTMLInputElement>("custom-until");
+  const maximum = inputDate(rangeDates("today").until);
+  since.value = inputDate(dates.since);
+  until.value = inputDate(dates.until);
+  since.max = maximum;
+  until.max = maximum;
+  until.setCustomValidity("");
+  dialog.showModal();
+}
+
 function bindEvents(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => {
     button.addEventListener("click", () => setView(button.dataset.view as ViewKey));
@@ -572,15 +657,39 @@ function bindEvents(): void {
   document.querySelectorAll<HTMLButtonElement>("[data-range]").forEach((button) => {
     button.addEventListener("click", () => {
       const range = button.dataset.range as RangeKey;
+      if (range === "custom") {
+        openCustomRange();
+        return;
+      }
       if (range === state.range) return;
-      state.range = range;
-      state.visibleSessions = 100;
-      document.querySelectorAll("[data-range]").forEach((item) =>
-        item.classList.toggle("is-active", (item as HTMLElement).dataset.range === range),
-      );
+      setRange(range);
       void loadUsage(false);
     });
   });
+  byId("custom-range-form").addEventListener("submit", (event) => {
+    event.preventDefault();
+    const since = byId<HTMLInputElement>("custom-since");
+    const until = byId<HTMLInputElement>("custom-until");
+    try {
+      state.customRange = customRangeDates(since.value, until.value);
+      until.setCustomValidity("");
+    } catch (error) {
+      until.setCustomValidity(error instanceof Error ? error.message : String(error));
+      until.reportValidity();
+      return;
+    }
+    byId<HTMLDialogElement>("custom-range-dialog").close();
+    setRange("custom");
+    void loadUsage(false);
+  });
+  byId("custom-range-cancel").addEventListener("click", () =>
+    byId<HTMLDialogElement>("custom-range-dialog").close(),
+  );
+  for (const id of ["custom-since", "custom-until"]) {
+    byId<HTMLInputElement>(id).addEventListener("input", () =>
+      byId<HTMLInputElement>("custom-until").setCustomValidity(""),
+    );
+  }
   document.querySelectorAll<HTMLButtonElement>("[data-metric]").forEach((button) => {
     button.addEventListener("click", () => {
       state.metric = button.dataset.metric as TrendMetric;

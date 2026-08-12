@@ -61,10 +61,12 @@
           </div>
           <div class="topbar-actions">
             <div class="range-switcher" role="group" aria-label="时间范围">
+              <button type="button" data-range="today">今天</button>
               <button type="button" data-range="7d" class="is-active">7 天</button>
               <button type="button" data-range="30d">30 天</button>
               <button type="button" data-range="90d">90 天</button>
               <button type="button" data-range="all">全部</button>
+              <button type="button" data-range="custom">自定义</button>
             </div>
             <button class="refresh-button" id="refresh-button" type="button">
               <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.7 8A8 8 0 1 0 20 15h-2.1a6 6 0 1 1-.7-5.5L14 13h8V5l-3.3 3Z"/></svg>
@@ -72,6 +74,30 @@
             </button>
           </div>
         </header>
+
+        <dialog class="date-dialog" id="custom-range-dialog" aria-labelledby="custom-range-title">
+          <form class="date-dialog-form" id="custom-range-form">
+            <div>
+              <p class="section-kicker">DATE RANGE</p>
+              <h2 id="custom-range-title">自定义日期</h2>
+              <p>起止日期均包含在统计范围内。</p>
+            </div>
+            <div class="date-fields">
+              <label>
+                <span>开始日期</span>
+                <input id="custom-since" name="since" type="date" required />
+              </label>
+              <label>
+                <span>结束日期</span>
+                <input id="custom-until" name="until" type="date" required />
+              </label>
+            </div>
+            <div class="dialog-actions">
+              <button class="dialog-cancel" id="custom-range-cancel" type="button">取消</button>
+              <button class="apply-range-button" type="submit">应用范围</button>
+            </div>
+          </form>
+        </dialog>
 
         <div class="load-line" id="load-line" aria-hidden="true"><span></span></div>
         <div class="banner" id="banner" role="status" hidden></div>
@@ -93,6 +119,7 @@
               </div>
               <div class="chart-wrap">
                 <svg id="trend-chart" viewBox="0 0 800 260" role="img" aria-label="每日消耗趋势图"></svg>
+                <output class="chart-tooltip" id="chart-tooltip" hidden></output>
                 <div class="empty-state" id="trend-empty" hidden>所选范围内暂无数据</div>
               </div>
               <div class="chart-legend">

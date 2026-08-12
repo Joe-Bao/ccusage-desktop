@@ -1,6 +1,11 @@
-export type RangeKey = "7d" | "30d" | "90d" | "all";
+export type RangeKey = "today" | "7d" | "30d" | "90d" | "all" | "custom";
 export type ViewKey = "overview" | "daily" | "sessions" | "settings";
 export type TrendMetric = "tokens" | "cost";
+
+export interface DateRange {
+  since?: string;
+  until?: string;
+}
 
 export interface TokenNumbers {
   inputTokens: number;
@@ -87,19 +92,50 @@ function localDate(date: Date): string {
 export function rangeDates(
   range: RangeKey,
   now = new Date(),
-): { since?: string; until?: string } {
+  customRange: DateRange = {},
+): DateRange {
   if (range === "all") return {};
-  const days = Number.parseInt(range, 10);
+  if (range === "custom") {
+    if (!customRange.since || !customRange.until) {
+      throw new Error("请选择自定义起止日期");
+    }
+    return { ...customRange };
+  }
+  const days = range === "today" ? 1 : Number.parseInt(range, 10);
   const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const start = new Date(end);
   start.setDate(start.getDate() - (days - 1));
   return { since: localDate(start), until: localDate(end) };
 }
 
-export function rangeLabel(range: RangeKey): string {
-  return { "7d": "最近 7 天", "30d": "最近 30 天", "90d": "最近 90 天", all: "全部时间" }[
-    range
-  ];
+export function customRangeDates(since: string, until: string): DateRange {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(since) || !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
+    throw new Error("请选择有效的起止日期");
+  }
+  const range = { since: since.replaceAll("-", ""), until: until.replaceAll("-", "") };
+  if (range.since > range.until) throw new Error("开始日期不能晚于结束日期");
+  return range;
+}
+
+function displayDate(value?: string): string {
+  return value?.length === 8
+    ? `${value.slice(0, 4)}/${value.slice(4, 6)}/${value.slice(6)}`
+    : "自定义";
+}
+
+export function rangeLabel(range: RangeKey, customRange: DateRange = {}): string {
+  if (range === "custom") {
+    const since = displayDate(customRange.since);
+    const until = displayDate(customRange.until);
+    return since === until ? since : `${since} – ${until}`;
+  }
+  return {
+    today: "今天",
+    "7d": "最近 7 天",
+    "30d": "最近 30 天",
+    "90d": "最近 90 天",
+    all: "全部时间",
+  }[range];
 }
 
 export function parseUsageResponse(input: unknown): UsageResponse {

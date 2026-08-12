@@ -1,6 +1,6 @@
 import type {
   AgentBreakdown,
-  RangeKey,
+  DateRange,
   TokenNumbers,
   UsageResponse,
   UsageRow,
@@ -110,10 +110,26 @@ function makeSessions(days: number, now: Date): UsageRow[] {
   });
 }
 
-export function demoResponse(range: RangeKey, now = new Date()): UsageResponse {
-  const days = range === "all" ? 120 : Number.parseInt(range, 10);
-  const daily = makeDaily(days, now);
-  const session = makeSessions(days, now);
+function compactDate(value: string | undefined, fallback: Date): Date {
+  if (!value || value.length !== 8) return fallback;
+  return new Date(Number(value.slice(0, 4)), Number(value.slice(4, 6)) - 1, Number(value.slice(6)));
+}
+
+export function demoResponse(range: DateRange, now = new Date()): UsageResponse {
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const end = compactDate(range.until, today);
+  const fallbackStart = new Date(end.getFullYear(), end.getMonth(), end.getDate() - 119);
+  const start = compactDate(range.since, fallbackStart);
+  const days = Math.max(
+    1,
+    Math.round(
+      (Date.UTC(end.getFullYear(), end.getMonth(), end.getDate()) -
+        Date.UTC(start.getFullYear(), start.getMonth(), start.getDate())) /
+        86_400_000,
+    ) + 1,
+  );
+  const daily = makeDaily(days, end);
+  const session = makeSessions(days, end);
   return {
     data: { daily, session, totals: totals(daily) },
     cached: true,

@@ -24,6 +24,9 @@
   --amber: #fbbf24;
   --danger: #fb7185;
   --shadow: 0 18px 60px rgba(0, 0, 0, 0.22);
+  --font-xs: clamp(0.6875rem, 0.66rem + 0.12vw, 0.75rem);
+  --font-sm: clamp(0.75rem, 0.71rem + 0.18vw, 0.875rem);
+  --font-md: clamp(0.8125rem, 0.77rem + 0.18vw, 0.9375rem);
 }
 
 * {
@@ -295,13 +298,16 @@ summary:focus-visible {
 
 .topbar-actions {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
 }
 
 .range-switcher,
 .metric-switcher {
   display: flex;
+  flex-wrap: wrap;
   padding: 3px;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -333,6 +339,7 @@ summary:focus-visible {
 }
 
 .refresh-button,
+.apply-range-button,
 .secondary-button,
 .load-more {
   display: inline-flex;
@@ -351,6 +358,7 @@ summary:focus-visible {
 }
 
 .refresh-button:hover,
+.apply-range-button:hover,
 .secondary-button:hover,
 .load-more:hover {
   background: #8af4e3;
@@ -371,6 +379,82 @@ summary:focus-visible {
 
 .refresh-button.is-loading svg {
   animation: spin 900ms linear infinite;
+}
+
+.date-dialog {
+  width: min(430px, calc(100vw - 32px));
+  padding: 0;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+}
+
+.date-dialog::backdrop {
+  background: rgba(4, 8, 13, 0.58);
+  backdrop-filter: blur(4px);
+}
+
+.date-dialog-form {
+  display: grid;
+  gap: 20px;
+  padding: 24px;
+}
+
+.date-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.date-dialog p:last-child {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: var(--font-sm);
+}
+
+.date-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.date-fields label {
+  display: grid;
+  gap: 7px;
+  color: var(--muted);
+  font-size: var(--font-sm);
+  font-weight: 650;
+}
+
+.date-fields input {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 11px;
+  color: var(--text);
+  color-scheme: dark;
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: var(--font-sm);
+}
+
+.dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 9px;
+}
+
+.dialog-cancel {
+  min-height: 38px;
+  padding: 0 14px;
+  color: var(--muted);
+  background: var(--surface-raised);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: var(--font-sm);
+  font-weight: 650;
 }
 
 @keyframes spin { to { transform: rotate(360deg); } }
@@ -557,7 +641,7 @@ summary:focus-visible {
 
 .chart-axis-label {
   fill: var(--dim);
-  font-size: 9px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -574,11 +658,58 @@ summary:focus-visible {
   vector-effect: non-scaling-stroke;
 }
 
+.chart-single-guide {
+  stroke: var(--accent);
+  stroke-linecap: round;
+  stroke-opacity: 0.28;
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+}
+
 .chart-point {
   fill: var(--surface);
+  pointer-events: none;
   stroke: var(--accent);
   stroke-width: 2;
   vector-effect: non-scaling-stroke;
+}
+
+.chart-hit {
+  fill: transparent;
+  cursor: crosshair;
+  outline: none;
+}
+
+.chart-datum:hover .chart-point,
+.chart-datum:focus-within .chart-point {
+  fill: var(--accent);
+}
+
+.chart-hit:focus-visible {
+  stroke: var(--accent);
+  stroke-width: 1;
+  vector-effect: non-scaling-stroke;
+}
+
+.chart-tooltip {
+  position: absolute;
+  z-index: 5;
+  max-width: calc(100% - 20px);
+  padding: 8px 10px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-raised) 92%, transparent);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+  transform: translate(-50%, calc(-100% - 12px));
+  white-space: nowrap;
+}
+
+.chart-tooltip.is-below {
+  transform: translate(-50%, 12px);
 }
 
 .chart-legend {
@@ -588,7 +719,7 @@ summary:focus-visible {
   padding-top: 11px;
   color: var(--dim);
   border-top: 1px solid var(--border);
-  font-size: 9px;
+  font-size: var(--font-xs);
 }
 
 .chart-legend span:first-child {
@@ -637,16 +768,55 @@ summary:focus-visible {
 }
 
 .distribution-item {
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(100px, 1fr) minmax(120px, 2.2fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(52px, 1.5fr) max-content;
   align-items: center;
-  gap: 12px;
+  gap: clamp(7px, 1vw, 12px);
+  min-width: 0;
+  cursor: help;
+  outline: none;
+}
+
+.distribution-tooltip {
+  position: absolute;
+  z-index: 10;
+  right: 0;
+  bottom: calc(100% + 7px);
+  max-width: 100%;
+  padding: 8px 10px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface-raised) 94%, transparent);
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  font-size: var(--font-sm);
+  font-variant-numeric: tabular-nums;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(4px);
+  transition: 120ms ease;
+  visibility: hidden;
+  white-space: nowrap;
+}
+
+.distribution-item:hover .distribution-tooltip,
+.distribution-item:focus-visible .distribution-tooltip {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+}
+
+.distribution-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
 }
 
 .distribution-name {
   overflow: hidden;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-sm);
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -670,9 +840,9 @@ summary:focus-visible {
 }
 
 .distribution-value {
-  min-width: 54px;
+  min-width: 0;
   color: var(--text);
-  font-size: 10px;
+  font-size: var(--font-sm);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -695,7 +865,7 @@ summary:focus-visible {
 
 .panel-meta {
   color: var(--dim);
-  font-size: 10px;
+  font-size: var(--font-xs);
 }
 
 .table-scroll {
@@ -714,7 +884,7 @@ th,
 td {
   padding: 13px 15px;
   border-bottom: 1px solid color-mix(in srgb, var(--border) 74%, transparent);
-  font-size: 10px;
+  font-size: var(--font-sm);
   font-variant-numeric: tabular-nums;
   text-align: right;
   vertical-align: middle;
@@ -726,7 +896,7 @@ th {
   top: 0;
   color: var(--dim);
   background: var(--surface);
-  font-size: 9px;
+  font-size: var(--font-xs);
   font-weight: 700;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -763,7 +933,7 @@ tbody tr:hover td {
   margin-top: 2px;
   overflow: hidden;
   color: var(--dim);
-  font-size: 8px;
+  font-size: var(--font-xs);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -778,7 +948,7 @@ tbody tr:hover td {
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: 6px;
-  font-size: 9px;
+  font-size: var(--font-xs);
   font-weight: 650;
 }
 
@@ -843,7 +1013,7 @@ tbody tr:hover td {
   background: var(--surface-raised);
   border: 1px solid var(--border);
   border-radius: 7px;
-  font-size: 10px;
+  font-size: var(--font-sm);
 }
 
 .search-box input {
@@ -894,7 +1064,7 @@ tbody tr:hover td {
 
 .session-rank {
   color: var(--dim);
-  font-size: 10px;
+  font-size: var(--font-xs);
   font-variant-numeric: tabular-nums;
 }
 
@@ -907,7 +1077,7 @@ tbody tr:hover td {
   overflow: hidden;
   color: var(--text);
   font-family: "Cascadia Code", "Segoe UI", monospace;
-  font-size: 10px;
+  font-size: var(--font-sm);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -920,7 +1090,7 @@ tbody tr:hover td {
   min-width: 0;
   margin-top: 5px;
   color: var(--dim);
-  font-size: 8px;
+  font-size: var(--font-xs);
 }
 
 .session-subtitle span:last-child {
@@ -938,17 +1108,17 @@ tbody tr:hover td {
   justify-content: space-between;
   margin-bottom: 6px;
   color: var(--dim);
-  font-size: 8px;
+  font-size: var(--font-xs);
 }
 
 .share-label strong {
   color: var(--muted);
-  font-size: 9px;
+  font-size: var(--font-sm);
 }
 
 .session-number {
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-sm);
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
@@ -957,7 +1127,7 @@ tbody tr:hover td {
   display: block;
   margin-top: 3px;
   color: var(--dim);
-  font-size: 8px;
+  font-size: var(--font-xs);
 }
 
 .chevron {
@@ -994,14 +1164,14 @@ tbody tr:hover td {
 
 .detail-cell small {
   color: var(--dim);
-  font-size: 8px;
+  font-size: var(--font-xs);
 }
 
 .detail-cell strong {
   margin-top: 5px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 10px;
+  font-size: var(--font-sm);
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1130,6 +1300,7 @@ tbody tr:hover td {
   .nav-count { position: absolute; margin: -25px 0 0 25px; }
   .load-line { left: 76px; }
   .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 @media (max-width: 820px) {
@@ -1139,6 +1310,7 @@ tbody tr:hover td {
   .content { padding-inline: 22px; }
   .banner { margin-inline: 22px; }
   .overview-grid { grid-template-columns: 1fr; }
+  .date-fields { grid-template-columns: 1fr; }
   .session-item summary { grid-template-columns: 30px minmax(170px, 1fr) minmax(130px, 0.7fr) 88px 16px; }
   .session-item summary > .session-number:nth-of-type(2) { display: none; }
   .session-details { grid-template-columns: repeat(3, minmax(0, 1fr)); padding-left: 62px; }
@@ -1165,6 +1337,7 @@ tbody tr:hover td {
   }
   body { background: var(--bg); }
   .refresh-button { color: #fff; }
+  .date-fields input { color-scheme: light; }
   .banner {
     color: #805900;
     background: #fff9e8;

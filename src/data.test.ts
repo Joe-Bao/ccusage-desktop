@@ -3,7 +3,9 @@ import test from "node:test";
 import {
   aggregateAgents,
   aggregateModels,
+  customRangeDates,
   rangeDates,
+  rangeLabel,
   sessionLabel,
   sessionsWithShare,
   type UsageDocument,
@@ -38,7 +40,19 @@ test("date ranges are inclusive and use local calendar dates", () => {
     since: "20260807",
     until: "20260813",
   });
+  assert.deepEqual(rangeDates("today", new Date(2026, 7, 13, 23, 59)), {
+    since: "20260813",
+    until: "20260813",
+  });
   assert.deepEqual(rangeDates("all"), {});
+});
+
+test("custom date ranges normalize native date values and reject reversed dates", () => {
+  const custom = customRangeDates("2026-08-01", "2026-08-13");
+  assert.deepEqual(custom, { since: "20260801", until: "20260813" });
+  assert.deepEqual(rangeDates("custom", new Date(), custom), custom);
+  assert.equal(rangeLabel("custom", custom), "2026/08/01 – 2026/08/13");
+  assert.throws(() => customRangeDates("2026-08-14", "2026-08-13"), /开始日期/);
 });
 
 test("session shares retain UTF-8 labels and sum to one", () => {
