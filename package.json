@@ -1,0 +1,28 @@
+{
+  "name": "ccusage-desktop",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
+    "desktop:dev": "pnpm prepare:sidecar && tauri dev",
+    "desktop:build": "pnpm prepare:sidecar && tauri build",
+    "test:ui": "node --test src/data.test.ts",
+    "test:rust": "pnpm prepare:sidecar && cargo test --manifest-path src-tauri/Cargo.toml",
+    "test": "pnpm test:ui && pnpm test:rust",
+    "check": "pnpm build && pnpm test && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "ccusage": "20.0.19"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "typescript": "~5.6.2",
+    "vite": "^6.0.3"
+  }
+}
