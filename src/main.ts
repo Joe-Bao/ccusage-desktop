@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import packageMetadata from "../package.json";
 import {
   aggregateAgents,
   aggregateModels,
@@ -30,6 +31,7 @@ import {
   type Locale,
   type MessageKey,
 } from "./i18n";
+import { fetchLatestVersion, isNewerVersion, RELEASES_URL } from "./updates";
 
 declare global {
   interface Window {
@@ -62,6 +64,8 @@ const state: {
   sessionQuery: string;
   sessionSort: "tokens" | "cost" | "latest";
   visibleSessions: number;
+  availableVersion: string | null;
+  updateDismissed: boolean;
 } = {
   range: "7d",
   view: "overview",
@@ -71,6 +75,8 @@ const state: {
   sessionQuery: "",
   sessionSort: "tokens",
   visibleSessions: 100,
+  availableVersion: null,
+  updateDismissed: false,
 };
 
 const locales: Locale[] = ["zh-CN", "en"];
@@ -634,14 +640,41 @@ function renderAll(): void {
   renderSettings();
 }
 
+function renderUpdate(): void {
+  const banner = byId("update-banner");
+  banner.hidden = state.availableVersion === null || state.updateDismissed;
+  if (banner.hidden || !state.availableVersion) return;
+
+  byId("update-title").textContent = t("update.available", {
+    version: state.availableVersion,
+  });
+  byId("update-description").textContent = t("update.description", {
+    current: packageMetadata.version,
+  });
+  byId("update-action").textContent = t("update.view");
+  byId("update-dismiss").setAttribute("aria-label", t("update.dismiss"));
+}
+
 function applyLanguage(): void {
   translateDocument();
   byId<HTMLSelectElement>("language-select").value = getLanguagePreference();
   setView(state.view);
+  renderUpdate();
   if (state.response) {
     renderAll();
     updateStatus();
     if (!IS_TAURI) showBanner(t("banner.preview"));
+  }
+}
+
+async function checkForUpdates(): Promise<void> {
+  try {
+    const version = await fetchLatestVersion();
+    if (!version || !isNewerVersion(packageMetadata.version, version)) return;
+    state.availableVersion = version;
+    renderUpdate();
+  } catch {
+    // Update checks must never interrupt local usage data.
   }
 }
 
@@ -793,6 +826,18 @@ function bindEvents(): void {
     });
   });
   byId("refresh-button").addEventListener("click", () => void loadUsage(true));
+  byId("update-action").addEventListener("click", async () => {
+    try {
+      if (IS_TAURI) await invoke("open_releases");
+      else window.open(RELEASES_URL, "_blank", "noopener,noreferrer");
+    } catch (error) {
+      showBanner(error instanceof Error ? error.message : String(error), true);
+    }
+  });
+  byId("update-dismiss").addEventListener("click", () => {
+    state.updateDismissed = true;
+    renderUpdate();
+  });
   byId<HTMLInputElement>("session-search").addEventListener("input", (event) => {
     state.sessionQuery = (event.currentTarget as HTMLInputElement).value;
     state.visibleSessions = 100;
@@ -831,3 +876,4 @@ bindEvents();
 setView("overview");
 byId<HTMLSelectElement>("language-select").value = getLanguagePreference();
 void loadUsage(false);
+void checkForUpdates();

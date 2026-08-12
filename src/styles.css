@@ -506,6 +506,77 @@ summary:focus-visible {
   border-color: rgba(251, 113, 133, 0.22);
 }
 
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  margin: 18px 32px 0;
+  padding: 12px 13px;
+  color: var(--text);
+  background: var(--accent-soft);
+  border: 1px solid rgba(94, 234, 212, 0.24);
+  border-radius: 8px;
+}
+
+.update-copy {
+  min-width: 0;
+}
+
+.update-copy strong,
+.update-copy span {
+  display: block;
+}
+
+.update-copy strong {
+  font-size: var(--font-sm);
+}
+
+.update-copy span {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: var(--font-xs);
+  line-height: 1.45;
+}
+
+.update-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+}
+
+.update-action {
+  min-height: 32px;
+  padding: 0 11px;
+  color: #07110f;
+  background: var(--accent);
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: var(--font-xs);
+  font-weight: 750;
+}
+
+.update-action:hover {
+  background: #8af4e3;
+}
+
+.update-dismiss {
+  width: 32px;
+  height: 32px;
+  color: var(--muted);
+  background: transparent;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: 19px;
+  line-height: 1;
+}
+
+.update-dismiss:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
 .content {
   width: 100%;
   max-width: 1480px;
@@ -1348,7 +1419,8 @@ tbody tr:hover td {
   .title-block > p:last-child { display: none; }
   .range-switcher button { padding-inline: 8px; }
   .content { padding-inline: 22px; }
-  .banner { margin-inline: 22px; }
+  .banner,
+  .update-banner { margin-inline: 22px; }
   .overview-grid { grid-template-columns: 1fr; }
   .date-fields { grid-template-columns: 1fr; }
   .session-item summary { grid-template-columns: 30px minmax(170px, 1fr) minmax(130px, 0.7fr) 88px 16px; }

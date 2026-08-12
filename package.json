@@ -1,7 +1,7 @@
 {
   "name": "ccusage-desktop",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,7 @@
     "prepare:sidecar": "node scripts/prepare-sidecar.mjs",
     "desktop:dev": "pnpm prepare:sidecar && tauri dev",
     "desktop:build": "pnpm prepare:sidecar && tauri build",
-    "test:ui": "node --test src/data.test.ts src/i18n.test.ts",
+    "test:ui": "node --test src/data.test.ts src/i18n.test.ts src/updates.test.ts",
     "test:rust": "pnpm prepare:sidecar && cargo test --manifest-path src-tauri/Cargo.toml",
     "test": "pnpm test:ui && pnpm test:rust",
     "check": "pnpm build && pnpm test && cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings",

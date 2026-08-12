@@ -15,6 +15,7 @@ const CACHE_VERSION: u8 = 2;
 const CACHE_TTL_SECONDS: u64 = 300;
 const MAX_CACHE_ENTRIES: usize = 6;
 const CCUSAGE_VERSION: &str = "20.0.19";
+const RELEASES_URL: &str = "https://github.com/Joe-Bao/ccusage-desktop/releases";
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -557,12 +558,24 @@ fn clear_cache(app: AppHandle, state: State<'_, CacheState>) -> Result<(), Strin
     Ok(())
 }
 
+#[tauri::command]
+#[allow(deprecated)]
+fn open_releases(app: AppHandle) -> Result<(), String> {
+    app.shell()
+        .open(RELEASES_URL, None)
+        .map_err(|error| format!("Cannot open releases page: {error}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(CacheState::default())
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![load_usage, clear_cache])
+        .invoke_handler(tauri::generate_handler![
+            load_usage,
+            clear_cache,
+            open_releases
+        ])
         .run(tauri::generate_context!())
         .expect("error while running CCUsage Desktop");
 }
