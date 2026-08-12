@@ -4,6 +4,7 @@ import {
   aggregateAgents,
   aggregateModels,
   customRangeDates,
+  DateRangeError,
   rangeDates,
   rangeLabel,
   sessionLabel,
@@ -53,7 +54,10 @@ test("custom date ranges normalize native date values and reject reversed dates"
   assert.deepEqual(custom, { since: "20260801", until: "20260813" });
   assert.deepEqual(rangeDates("custom", new Date(), custom), custom);
   assert.equal(rangeLabel("custom", custom), "2026/08/01 – 2026/08/13");
-  assert.throws(() => customRangeDates("2026-08-14", "2026-08-13"), /开始日期/);
+  assert.throws(
+    () => customRangeDates("2026-08-14", "2026-08-13"),
+    (error) => error instanceof DateRangeError && error.code === "reversed",
+  );
 });
 
 test("session shares retain UTF-8 labels and sum to one", () => {

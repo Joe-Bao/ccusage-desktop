@@ -76,6 +76,18 @@ export interface SessionUsage extends UsageRow {
   cacheShare: number;
 }
 
+export type DateRangeErrorCode = "missing" | "invalid" | "reversed";
+
+export class DateRangeError extends Error {
+  readonly code: DateRangeErrorCode;
+
+  constructor(code: DateRangeErrorCode) {
+    super(code);
+    this.name = "DateRangeError";
+    this.code = code;
+  }
+}
+
 const ZERO_TOTALS: TokenNumbers = {
   inputTokens: 0,
   outputTokens: 0,
@@ -100,7 +112,7 @@ export function rangeDates(
   if (range === "all") return {};
   if (range === "custom") {
     if (!customRange.since || !customRange.until) {
-      throw new Error("请选择自定义起止日期");
+      throw new DateRangeError("missing");
     }
     return { ...customRange };
   }
@@ -113,10 +125,10 @@ export function rangeDates(
 
 export function customRangeDates(since: string, until: string): DateRange {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(since) || !/^\d{4}-\d{2}-\d{2}$/.test(until)) {
-    throw new Error("请选择有效的起止日期");
+    throw new DateRangeError("invalid");
   }
   const range = { since: since.replaceAll("-", ""), until: until.replaceAll("-", "") };
-  if (range.since > range.until) throw new Error("开始日期不能晚于结束日期");
+  if (range.since > range.until) throw new DateRangeError("reversed");
   return range;
 }
 

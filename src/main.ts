@@ -4,6 +4,7 @@ import {
   aggregateModels,
   cacheShare,
   customRangeDates,
+  DateRangeError,
   parseUsageResponse,
   rangeDates,
   rangeLabel,
@@ -19,6 +20,16 @@ import {
   type ViewKey,
 } from "./data";
 import { demoResponse } from "./demo";
+import {
+  getLanguagePreference,
+  getLocale,
+  setLanguagePreference,
+  t,
+  translateDocument,
+  type LanguagePreference,
+  type Locale,
+  type MessageKey,
+} from "./i18n";
 
 declare global {
   interface Window {
@@ -28,11 +39,18 @@ declare global {
 
 const IS_TAURI = "__TAURI_INTERNALS__" in window;
 const SVG_NS = "http://www.w3.org/2000/svg";
-const VIEW_COPY: Record<ViewKey, [string, string, string]> = {
-  overview: ["USAGE PULSE", "用量总览", "本机所有 AI 编码工具的 Token 与费用"],
-  daily: ["DAILY LEDGER", "每日明细", "观察每日消耗、缓存利用与模型变化"],
-  sessions: ["SESSION SHARE", "会话分析", "定位占用最高的会话并展开 Token 构成"],
-  settings: ["LOCAL FIRST", "设置", "缓存、运行时与本地数据源状态"],
+const VIEW_KEYS: Record<ViewKey, [MessageKey, MessageKey, MessageKey]> = {
+  overview: ["view.overview.eyebrow", "view.overview.title", "view.overview.subtitle"],
+  daily: ["view.daily.eyebrow", "view.daily.title", "view.daily.subtitle"],
+  sessions: ["view.sessions.eyebrow", "view.sessions.title", "view.sessions.subtitle"],
+  settings: ["view.settings.eyebrow", "view.settings.title", "view.settings.subtitle"],
+};
+const RANGE_LABEL_KEYS: Record<Exclude<RangeKey, "custom">, MessageKey> = {
+  today: "range.today",
+  "7d": "range.label.7d",
+  "30d": "range.label.30d",
+  "90d": "range.label.90d",
+  all: "range.label.all",
 };
 
 const state: {
@@ -55,22 +73,37 @@ const state: {
   visibleSessions: 100,
 };
 
-const compactNumber = new Intl.NumberFormat("zh-CN", {
-  notation: "compact",
-  maximumFractionDigits: 1,
-});
-const exactNumber = new Intl.NumberFormat("zh-CN", { maximumFractionDigits: 0 });
-const usd = new Intl.NumberFormat("zh-CN", {
-  style: "currency",
-  currency: "USD",
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-const percent = new Intl.NumberFormat("zh-CN", {
-  style: "percent",
-  minimumFractionDigits: 1,
-  maximumFractionDigits: 1,
-});
+const locales: Locale[] = ["zh-CN", "en"];
+const compactNumber = Object.fromEntries(
+  locales.map((locale) => [
+    locale,
+    new Intl.NumberFormat(locale, { notation: "compact", maximumFractionDigits: 1 }),
+  ]),
+) as Record<Locale, Intl.NumberFormat>;
+const exactNumber = Object.fromEntries(
+  locales.map((locale) => [locale, new Intl.NumberFormat(locale, { maximumFractionDigits: 0 })]),
+) as Record<Locale, Intl.NumberFormat>;
+const usd = Object.fromEntries(
+  locales.map((locale) => [
+    locale,
+    new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency: "USD",
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    }),
+  ]),
+) as Record<Locale, Intl.NumberFormat>;
+const percent = Object.fromEntries(
+  locales.map((locale) => [
+    locale,
+    new Intl.NumberFormat(locale, {
+      style: "percent",
+      minimumFractionDigits: 1,
+      maximumFractionDigits: 1,
+    }),
+  ]),
+) as Record<Locale, Intl.NumberFormat>;
 
 function byId<T extends Element = HTMLElement>(id: string): T {
   const node = document.getElementById(id);
@@ -99,19 +132,19 @@ function svgNode<K extends keyof SVGElementTagNameMap>(
 }
 
 function formatTokens(value: number): string {
-  return compactNumber.format(Number.isFinite(value) ? value : 0);
+  return compactNumber[getLocale()].format(Number.isFinite(value) ? value : 0);
 }
 
 function formatExact(value: number): string {
-  return exactNumber.format(Number.isFinite(value) ? value : 0);
+  return exactNumber[getLocale()].format(Number.isFinite(value) ? value : 0);
 }
 
 function formatCost(value: number): string {
-  return usd.format(Number.isFinite(value) ? value : 0);
+  return usd[getLocale()].format(Number.isFinite(value) ? value : 0);
 }
 
 function formatPercent(value: number): string {
-  return percent.format(Number.isFinite(value) ? value : 0);
+  return percent[getLocale()].format(Number.isFinite(value) ? value : 0);
 }
 
 function activeDates(): DateRange {
@@ -119,7 +152,9 @@ function activeDates(): DateRange {
 }
 
 function activeRangeLabel(): string {
-  return rangeLabel(state.range, state.customRange);
+  return state.range === "custom"
+    ? rangeLabel(state.range, state.customRange)
+    : t(RANGE_LABEL_KEYS[state.range]);
 }
 
 function inputDate(value?: string): string {
@@ -130,14 +165,17 @@ function inputDate(value?: string): string {
 
 function formatDate(value: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  return match ? `${match[2]} 月 ${match[3]} 日` : value;
+  if (!match) return value;
+  return new Intl.DateTimeFormat(getLocale(), { month: "short", day: "2-digit" }).format(
+    new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3])),
+  );
 }
 
 function formatDateTime(value?: string): string {
-  if (!value) return "未知时间";
+  if (!value) return t("time.unknown");
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
+  return new Intl.DateTimeFormat(getLocale(), {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
@@ -155,27 +193,27 @@ function renderKpis(): void {
   const peak = [...document.daily].sort((a, b) => b.totalTokens - a.totalTokens)[0];
   const cards = [
     {
-      label: "预估费用",
+      label: t("kpi.estimatedCost"),
       value: formatCost(totals.totalCost),
-      meta: `${activeRangeLabel()} · 离线价格`,
+      meta: t("kpi.offlinePrice", { range: activeRangeLabel() }),
       icon: "$",
     },
     {
-      label: "总 Tokens",
+      label: t("kpi.totalTokens"),
       value: formatTokens(totals.totalTokens),
-      meta: `日均 ${formatTokens(totals.totalTokens / activeDays)}`,
+      meta: t("kpi.dailyAverage", { tokens: formatTokens(totals.totalTokens / activeDays) }),
       icon: "T",
     },
     {
-      label: "缓存占比",
+      label: t("kpi.cacheShare"),
       value: formatPercent(cacheShare(totals)),
-      meta: `${formatTokens(totals.cacheReadTokens)} 次缓存读取`,
+      meta: t("kpi.cacheReads", { tokens: formatTokens(totals.cacheReadTokens) }),
       icon: "C",
     },
     {
-      label: "峰值日",
+      label: t("kpi.peakDay"),
       value: peak ? formatTokens(peak.totalTokens) : "—",
-      meta: peak ? formatDate(peak.period) : "暂无活跃记录",
+      meta: peak ? formatDate(peak.period) : t("kpi.noActivity"),
       icon: "↑",
     },
   ];
@@ -193,7 +231,7 @@ function renderDistribution(containerId: string, items: NamedTotal[]): void {
   const container = byId(containerId);
   container.replaceChildren();
   if (items.length === 0) {
-    container.append(node("div", "empty-state", "暂无分布数据"));
+    container.append(node("div", "empty-state", t("distribution.empty")));
     return;
   }
 
@@ -206,7 +244,7 @@ function renderDistribution(containerId: string, items: NamedTotal[]): void {
     fill.style.width = `${Math.max(item.share * 100, 0.5)}%`;
     track.append(fill);
     row.tabIndex = 0;
-    row.setAttribute("aria-label", `${item.name}，${detail}`);
+    row.setAttribute("aria-label", `${item.name}, ${detail}`);
     const tooltip = node("span", "distribution-tooltip", detail);
     tooltip.setAttribute("aria-hidden", "true");
     row.append(name, track, node("span", "distribution-value", formatPercent(item.share)), tooltip);
@@ -340,8 +378,12 @@ function renderTrend(): void {
 
   const total = values.reduce((sum, value) => sum + value, 0);
   const peakIndex = values.indexOf(Math.max(...values));
-  byId("legend-primary").textContent = state.metric === "tokens" ? "总 Tokens" : "预估费用";
-  byId("chart-summary").textContent = `合计 ${state.metric === "tokens" ? formatTokens(total) : formatCost(total)} · 峰值 ${formatDate(rows[peakIndex].period)}`;
+  byId("legend-primary").textContent =
+    state.metric === "tokens" ? t("common.totalTokens") : t("kpi.estimatedCost");
+  byId("chart-summary").textContent = t("chart.summary", {
+    total: state.metric === "tokens" ? formatTokens(total) : formatCost(total),
+    date: formatDate(rows[peakIndex].period),
+  });
 }
 
 function renderOverview(): void {
@@ -366,7 +408,7 @@ function renderDaily(): void {
   const empty = byId("daily-empty");
   body.replaceChildren();
   empty.hidden = rows.length > 0;
-  byId("daily-count").textContent = `${rows.length} 个活跃日`;
+  byId("daily-count").textContent = t("daily.activeDays", { count: formatExact(rows.length) });
   const rangeTotal = Math.max(state.response?.data.totals.totalTokens ?? 0, 1);
 
   for (const usage of [...rows].reverse()) {
@@ -396,10 +438,12 @@ function renderDaily(): void {
     appendCell(row, formatTokens(usage.outputTokens));
     appendCell(row, formatTokens(usage.cacheReadTokens));
     const totalCell = node("td");
-    totalCell.append(
-      node("span", "table-primary", formatTokens(usage.totalTokens)),
-      node("small", "table-secondary", `占所选范围 ${formatPercent(usage.totalTokens / rangeTotal)}`),
-    );
+    const shareValue = formatPercent(usage.totalTokens / rangeTotal);
+    const share = node("small", "table-secondary table-share", shareValue);
+    share.title = t("daily.shareHelp");
+    share.tabIndex = 0;
+    share.setAttribute("aria-label", `${shareValue}. ${t("daily.shareHelp")}`);
+    totalCell.append(node("span", "table-primary", formatTokens(usage.totalTokens)), share);
     row.append(totalCell);
     appendCell(row, formatCost(usage.totalCost), true);
     body.append(row);
@@ -439,9 +483,21 @@ function renderSessionStats(sessions: SessionUsage[]): void {
   container.replaceChildren();
   const sorted = [...sessions].sort((left, right) => right.totalTokens - left.totalTokens);
   const cards = [
-    ["会话数量", formatExact(sessions.length), `${activeRangeLabel()}内有活动`],
-    ["最大单会话占用", sorted[0] ? formatPercent(sorted[0].share) : "—", sorted[0] ? sessionTitle(sorted[0]) : "暂无会话"],
-    ["Top 5 集中度", formatPercent(topFiveConcentration(sessions)), "前五个会话占全部 Tokens"],
+    [
+      t("sessions.count"),
+      formatExact(sessions.length),
+      t("sessions.activeWithin", { range: activeRangeLabel() }),
+    ],
+    [
+      t("sessions.largest"),
+      sorted[0] ? formatPercent(sorted[0].share) : "—",
+      sorted[0] ? sessionTitle(sorted[0]) : t("sessions.none"),
+    ],
+    [
+      t("sessions.topFive"),
+      formatPercent(topFiveConcentration(sessions)),
+      t("sessions.topFiveMeta"),
+    ],
   ];
   for (const [label, value, meta] of cards) {
     const card = node("article", "mini-stat");
@@ -487,12 +543,15 @@ function renderSessions(): void {
       project.title = session.metadata.cwd ?? session.metadata.project;
       subtitle.append(project);
     }
-    subtitle.append(node("span", undefined, session.modelsUsed.join(", ") || "未知模型"));
+    subtitle.append(node("span", undefined, session.modelsUsed.join(", ") || t("sessions.unknownModel")));
     main.append(title, subtitle);
 
     const share = node("div", "share-column");
     const shareLabel = node("div", "share-label");
-    shareLabel.append(node("span", undefined, "占全部会话"), node("strong", undefined, formatPercent(session.share)));
+    shareLabel.append(
+      node("span", undefined, t("sessions.allShare")),
+      node("strong", undefined, formatPercent(session.share)),
+    );
     const track = node("div", "share-track");
     const fill = node("i", "share-fill");
     fill.style.width = `${Math.max(session.share * 100, 0.35)}%`;
@@ -507,13 +566,13 @@ function renderSessions(): void {
 
     const detail = node("div", "session-details");
     detail.append(
-      detailCell("项目", session.metadata?.project ?? "—"),
-      detailCell("工作目录", session.metadata?.cwd ?? "—"),
-      detailCell("输入 Tokens", formatExact(session.inputTokens)),
-      detailCell("输出 Tokens", formatExact(session.outputTokens)),
-      detailCell("缓存读取", formatExact(session.cacheReadTokens)),
-      detailCell("推理 Tokens", formatExact(session.metadata?.reasoningOutputTokens ?? 0)),
-      detailCell("模型", session.modelsUsed.join(", ") || "—"),
+      detailCell(t("sessions.project"), session.metadata?.project ?? "—"),
+      detailCell(t("sessions.cwd"), session.metadata?.cwd ?? "—"),
+      detailCell(t("sessions.inputTokens"), formatExact(session.inputTokens)),
+      detailCell(t("sessions.outputTokens"), formatExact(session.outputTokens)),
+      detailCell(t("daily.cacheRead"), formatExact(session.cacheReadTokens)),
+      detailCell(t("sessions.reasoningTokens"), formatExact(session.metadata?.reasoningOutputTokens ?? 0)),
+      detailCell(t("sessions.models"), session.modelsUsed.join(", ") || "—"),
     );
     const mix = node("div", "token-mix");
     const total = Math.max(session.totalTokens, 1);
@@ -527,25 +586,27 @@ function renderSessions(): void {
       segment.style.width = `${(value / total) * 100}%`;
       mix.append(segment);
     }
-    mix.title = `输入 / 输出 / 缓存读取 / 缓存创建 · 缓存占比 ${formatPercent(session.cacheShare)}`;
+    mix.title = t("sessions.mixHelp", { share: formatPercent(session.cacheShare) });
     detail.append(mix);
     details.append(summary, detail);
     list.append(details);
   });
 
   more.hidden = visible.length >= sessions.length;
-  more.textContent = `显示更多（剩余 ${formatExact(sessions.length - visible.length)}）`;
+  more.textContent = t("sessions.moreRemaining", {
+    count: formatExact(sessions.length - visible.length),
+  });
 }
 
 function renderSettings(): void {
   const response = state.response;
   if (!response) return;
   byId("cache-state").textContent = response.stale
-    ? "旧缓存（刷新失败）"
+    ? t("cache.stale")
     : response.cached
-      ? `缓存命中 · ${response.cacheAgeSeconds} 秒前`
-      : "已写入新缓存";
-  byId("cache-time").textContent = new Intl.DateTimeFormat("zh-CN", {
+      ? t("cache.hit", { seconds: response.cacheAgeSeconds })
+      : t("cache.new");
+  byId("cache-time").textContent = new Intl.DateTimeFormat(getLocale(), {
     dateStyle: "medium",
     timeStyle: "medium",
   }).format(new Date(response.generatedAt * 1000));
@@ -556,7 +617,7 @@ function renderSettings(): void {
   chips.replaceChildren();
   const sources = aggregateAgents(response.data);
   if (sources.length === 0) {
-    chips.append(node("span", "source-chip", "暂未检测到活跃来源"));
+    chips.append(node("span", "source-chip", t("sources.none")));
   } else {
     for (const source of sources) {
       const chip = node("span", "source-chip", `${source.name} · ${formatPercent(source.share)}`);
@@ -573,6 +634,17 @@ function renderAll(): void {
   renderSettings();
 }
 
+function applyLanguage(): void {
+  translateDocument();
+  byId<HTMLSelectElement>("language-select").value = getLanguagePreference();
+  setView(state.view);
+  if (state.response) {
+    renderAll();
+    updateStatus();
+    if (!IS_TAURI) showBanner(t("banner.preview"));
+  }
+}
+
 function setView(view: ViewKey): void {
   state.view = view;
   document.querySelectorAll<HTMLButtonElement>("[data-view]").forEach((button) => {
@@ -585,10 +657,10 @@ function setView(view: ViewKey): void {
     section.hidden = section.id !== `view-${view}`;
     section.classList.toggle("is-active", !section.hidden);
   });
-  const [eyebrow, title, subtitle] = VIEW_COPY[view];
-  byId("view-eyebrow").textContent = eyebrow;
-  byId("view-title").textContent = title;
-  byId("view-subtitle").textContent = subtitle;
+  const [eyebrow, title, subtitle] = VIEW_KEYS[view];
+  byId("view-eyebrow").textContent = t(eyebrow);
+  byId("view-title").textContent = t(title);
+  byId("view-subtitle").textContent = t(subtitle);
   byId("view-title").focus?.();
 }
 
@@ -597,7 +669,7 @@ function setLoading(loading: boolean): void {
   const refresh = byId<HTMLButtonElement>("refresh-button");
   refresh.disabled = loading;
   refresh.classList.toggle("is-loading", loading);
-  refresh.querySelector("span")!.textContent = loading ? "读取中" : "刷新";
+  refresh.querySelector("span")!.textContent = loading ? t("common.loading") : t("common.refresh");
   document.querySelector(".workspace")?.setAttribute("aria-busy", String(loading));
 }
 
@@ -614,10 +686,11 @@ function updateStatus(): void {
   const sources = aggregateAgents(response.data);
   const dot = byId("status-dot");
   dot.className = `status-dot ${response.stale ? "is-error" : "is-ready"}`;
-  byId("source-status").textContent = sources.length > 0 ? `${sources.length} 个数据源已就绪` : "数据源已就绪";
+  byId("source-status").textContent =
+    sources.length > 0 ? t("status.sourcesReady", { count: sources.length }) : t("status.ready");
   byId("sync-status").textContent = response.cached
-    ? `缓存响应 ${response.durationMs} ms · ${activeRangeLabel()}`
-    : `扫描完成 ${response.durationMs} ms · ${activeRangeLabel()}`;
+    ? t("status.cacheResponse", { duration: response.durationMs, range: activeRangeLabel() })
+    : t("status.scanComplete", { duration: response.durationMs, range: activeRangeLabel() });
 }
 
 async function loadUsage(refresh: boolean): Promise<void> {
@@ -634,12 +707,12 @@ async function loadUsage(refresh: boolean): Promise<void> {
     state.response = parseUsageResponse(raw);
     renderAll();
     updateStatus();
-    showBanner(state.response.warning, state.response.stale);
+    showBanner(IS_TAURI ? state.response.warning : t("banner.preview"), state.response.stale);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     byId("status-dot").className = "status-dot is-error";
-    byId("source-status").textContent = "数据读取失败";
-    byId("sync-status").textContent = "请检查本机 usage 文件";
+    byId("source-status").textContent = t("status.readFailed");
+    byId("sync-status").textContent = t("status.checkFiles");
     showBanner(message, true);
   } finally {
     setLoading(false);
@@ -692,7 +765,9 @@ function bindEvents(): void {
       state.customRange = customRangeDates(since.value, until.value);
       until.setCustomValidity("");
     } catch (error) {
-      until.setCustomValidity(error instanceof Error ? error.message : String(error));
+      until.setCustomValidity(
+        error instanceof DateRangeError ? t(`error.date.${error.code}`) : String(error),
+      );
       until.reportValidity();
       return;
     }
@@ -731,22 +806,28 @@ function bindEvents(): void {
     state.visibleSessions += 100;
     renderSessions();
   });
+  byId<HTMLSelectElement>("language-select").addEventListener("change", (event) => {
+    setLanguagePreference((event.currentTarget as HTMLSelectElement).value as LanguagePreference);
+    applyLanguage();
+  });
   byId("clear-cache").addEventListener("click", async () => {
     const button = byId<HTMLButtonElement>("clear-cache");
     button.disabled = true;
     try {
       if (IS_TAURI) await invoke("clear_cache");
-      button.textContent = "缓存已清除";
+      button.textContent = t("cache.cleared");
       await loadUsage(true);
     } catch (error) {
       showBanner(error instanceof Error ? error.message : String(error), true);
     } finally {
       button.disabled = false;
-      button.textContent = "清除缓存";
+      button.textContent = t("settings.clearCache");
     }
   });
 }
 
+translateDocument();
 bindEvents();
 setView("overview");
+byId<HTMLSelectElement>("language-select").value = getLanguagePreference();
 void loadUsage(false);
