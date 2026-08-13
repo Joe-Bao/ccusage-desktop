@@ -1,87 +1,105 @@
 # CCUsage Desktop
 
-一个本地优先的 Windows Token 用量看板。它把 [ccusage](https://github.com/ccusage/ccusage) 随应用一起打包，通过 Tauri 2 + WebView2 展示用量、费用、模型、工具、项目和会话。
+English | [简体中文](README.zh-CN.md)
 
-[下载最新 Windows 安装包](https://github.com/Joe-Bao/ccusage-desktop/releases/latest)
+A local-first Windows desktop dashboard for [ccusage](https://github.com/ccusage/ccusage). It turns local AI coding usage logs into a clear view of Tokens, estimated cost, models, tools, projects, and sessions.
 
-## 功能
+[Download the latest Windows release](https://github.com/Joe-Bao/ccusage-desktop/releases/latest)
 
-- 今天、最近 7/30/90 天、全部时间与自定义日期范围
-- 每日趋势、完整数值悬浮提示、模型与工具分布
-- 每日输入、输出、缓存读取、总 Tokens、费用及范围占比
-- Codex 会话标题与项目识别，会话搜索、排序和 Token 构成
-- 简体中文 / English，可跟随系统语言
-- 5 分钟本地缓存；刷新失败时可回退到旧缓存
-- 深色 / 浅色主题和 Windows 显示缩放适配
+![CCUsage Desktop overview showing Token KPIs, a daily trend chart, model usage, and tool distribution](docs/images/dashboard.png)
 
-所有 usage 文件都在本机读取，应用不会上传会话、项目、Token 或费用数据。费用由 ccusage 的离线价格快照估算。
+> The screenshot uses built-in demo data. The desktop app reads your actual local usage data.
 
-## 安装与更新
+## Highlights
 
-当前构建提供 Windows NSIS 用户级安装包。同一 Windows 用户重复运行新版安装包即可覆盖升级，并继续使用原有应用数据。
+- Today, 7/30/90-day, all-time, and custom date ranges
+- Daily Token and cost trends with precise hover/focus tooltips
+- Per-day input, output, cache-read, total Token, cost, and range-share values
+- Model and coding-tool distribution
+- Codex session titles and projects, with search, sorting, and Token breakdowns
+- English and Simplified Chinese, including system-language detection
+- Responsive Windows UI with light/dark theme and display-scaling support
+- Five-minute local result cache with stale-data fallback
 
-应用启动后会匿名请求 GitHub 的 `latest Release` 接口：
+## Install
 
-- 只读取最新稳定版的版本标签，不发送本地 usage 数据
-- 只有远端版本高于当前版本时才显示更新提示
-- 点击提示会打开 GitHub Releases 页面，由用户下载并运行安装包
-- 网络不可用、接口限流或尚无 Release 时静默跳过，不影响本地数据加载
+1. Download `CCUsage Desktop_*_x64-setup.exe` from [Releases](https://github.com/Joe-Bao/ccusage-desktop/releases).
+2. Run the installer.
 
-这不是后台静默安装器。每个版本必须发布为 GitHub Release（建议标签格式 `vX.Y.Z`）并附上安装包，已安装客户端才能发现它。
+The NSIS installer is per-user. Running a newer installer upgrades the existing installation in place and keeps application data.
 
-> 未签名的开发构建可能触发 Windows SmartScreen。公开分发时建议使用可信代码签名证书。
+> Builds are currently unsigned, so Windows SmartScreen may show a warning.
 
-## 本地开发
+## Privacy and updates
 
-需要：
+Usage processing stays local:
 
-- Windows 10/11 和 WebView2 Runtime
+- The bundled ccusage executable reads local usage files with offline pricing.
+- No session, project, Token, or cost data is uploaded.
+- No local web server is started by the installed desktop app.
+- On startup, the app makes one anonymous request to GitHub's latest Release endpoint. It reads only the version tag and silently skips the check if GitHub is unavailable.
+
+When a newer stable version exists, the app shows a dismissible notice that opens the Releases page. Downloads and installation remain user-controlled; there is no background auto-installer.
+
+## Cache behavior
+
+The app caches up to six date-range results in Tauri's application cache directory:
+
+- A result newer than five minutes is returned without running ccusage.
+- Missing or expired results run ccusage for the selected date range.
+- There is no timed background scan.
+- Refresh bypasses the cache.
+- If a scan fails, an older cached result can remain visible with a warning.
+
+ccusage scans supported local usage locations, not the whole Windows drive.
+
+## Development
+
+Requirements:
+
+- Windows 10/11 with WebView2 Runtime
 - Node.js 20+
 - pnpm 10
-- Rust stable（MSVC）
-- Visual Studio Build Tools 的“使用 C++ 的桌面开发”组件
+- Rust stable with the MSVC target
+- Visual Studio Build Tools with “Desktop development with C++”
 
 ```powershell
 pnpm install
 pnpm desktop:dev
 ```
 
-`prepare:sidecar` 会从 ccusage 的官方可选平台包准备原生 Windows 二进制，不依赖全局安装的 ccusage。
+`prepare:sidecar` copies the native Windows binary from ccusage's optional platform package. A global ccusage installation is not required.
 
-## 验证与构建
+## Verify and build
 
 ```powershell
-# TypeScript、前端构建、Node/Rust 测试、格式和 Clippy
+# TypeScript, frontend build, Node/Rust tests, formatting, and Clippy
 pnpm check
 
-# 生成 NSIS 安装包
+# Build the Windows NSIS installer
 pnpm desktop:build
 ```
 
-安装包输出到 `src-tauri/target/release/bundle/nsis/`。默认构建不包含代码签名。
+The installer is written to `src-tauri/target/release/bundle/nsis/`.
 
-## 发布新版本
+## Publishing a release
 
-1. 同步更新 `package.json`、`src-tauri/Cargo.toml` 和 `src-tauri/tauri.conf.json` 中的版本号。
-2. 运行 `pnpm check` 和 `pnpm desktop:build`。
-3. 创建 `vX.Y.Z` 标签并发布 GitHub Release。
-4. 上传 `src-tauri/target/release/bundle/nsis/` 下的安装包。
+1. Update the version in `package.json`, `src-tauri/Cargo.toml`, and `src-tauri/tauri.conf.json`.
+2. Run `pnpm check` and `pnpm desktop:build`.
+3. Create a `vX.Y.Z` Git tag and a stable GitHub Release.
+4. Upload the NSIS installer.
 
-草稿和预发布版不会被客户端的稳定版更新检查选中。
+Drafts and prereleases are intentionally ignored by the in-app stable update check.
 
-## 缓存
+## Project layout
 
-缓存文件名为 `usage-v1.json`，位于 Tauri 的应用缓存目录中。缓存最多保留 6 个日期范围，5 分钟内优先复用；“刷新”会绕过缓存。设置页可以清除缓存并立即重新扫描。
+- `src/main.ts` — DOM rendering and interactions
+- `src/data.ts` — ccusage JSON validation, statistics, and session aggregation
+- `src/updates.ts` — GitHub Release lookup and version comparison
+- `src-tauri/src/lib.rs` — sidecar execution, Codex metadata enrichment, and cache
+- `scripts/prepare-sidecar.mjs` — native ccusage sidecar preparation
+- `THIRD_PARTY_NOTICES.md` — bundled third-party notices
 
-## 项目结构
+## License
 
-- `src/main.ts`：DOM 渲染与交互
-- `src/data.ts`：ccusage JSON 校验、统计与会话聚合
-- `src/updates.ts`：GitHub Release 查询与版本比较
-- `src-tauri/src/lib.rs`：sidecar 调用、Codex 元数据补充与缓存
-- `scripts/prepare-sidecar.mjs`：准备当前 Windows 架构的 ccusage 二进制
-- `THIRD_PARTY_NOTICES.md`：随安装包分发的第三方许可
-
-## 许可
-
-ccusage 使用 MIT License，完整文本见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。本项目自身目前尚未声明开源许可证。
+ccusage is distributed under the MIT License; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This repository does not currently declare a license for CCUsage Desktop itself.
